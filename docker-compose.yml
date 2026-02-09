@@ -1,0 +1,140 @@
+services:
+
+  bot_service:
+    build:
+      context: ./bot_service
+      dockerfile: Dockerfile
+    container_name: todo_service.bot_app
+    hostname: todo_service.bot_app
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+    - "${BOT_GUVICORN_PORT}"
+    ports:
+    - "${BOT_GUVICORN_PORT}:${BOT_GUVICORN_PORT}"
+    depends_on:
+      todo_db:
+        condition: service_healthy
+      todo_redis:
+        condition: service_healthy
+      todo_service:
+        condition: service_started
+    volumes:
+      - bot_service_static_data:/app/static
+
+  todo_service:
+    build:
+      context: ./todo_service
+      dockerfile: Dockerfile
+    container_name: todo_service.todo_app
+    hostname: todo_service.todo_app
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+    - "8000"
+    ports:
+    - "8000:8000"
+    depends_on:
+      todo_db:
+        condition: service_healthy
+      todo_redis:
+        condition: service_healthy
+    volumes:
+      - todo_service_static_data:/app/static
+
+  todo_db:
+    image: postgres:17.6-alpine
+    container_name: todo_service.todo_db
+    hostname: todo_service.todo_db
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+      - "5432"
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 20s
+      retries: 3
+    volumes:
+      - todo_db_data:/var/lib/postgresql/data
+
+  todo_celery:
+    build:
+      context: ./todo_service
+      dockerfile: Dockerfile
+    restart: always
+    container_name: todo_service.todo_celery
+    hostname: todo_service.todo_celery
+    env_file:
+      - .env
+    command: bash -c "celery -A config worker -l info --statedb=./celery_working.state --autoscale=16,1"
+    depends_on:
+      - todo_service
+      - todo_redis
+    volumes:
+      - todo_celery_data:/var/lib/celery/data
+
+  todo_celery_beat:
+    build:
+      context: ./todo_service
+      dockerfile: Dockerfile
+    container_name: todo_service.todo_celery_beat
+    hostname: todo_service.todo_celery_beat
+    env_file:
+      - .env
+    command: bash -c "celery -A config beat -l info"
+    depends_on:
+      - todo_service
+      - todo_redis
+    volumes:
+      - todo_celery_beat_data:/var/lib/celery_beat/data
+
+  todo_redis:
+    container_name: todo_service.redis
+    hostname: todo_service.redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    expose:
+      - "6379"
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - todo_service_redis_data:/data
+
+  todo_flower:
+    build:
+      context: ./todo_service
+      dockerfile: Dockerfile
+    container_name: todo_service.flower
+    hostname: todo_service.flower
+    env_file:
+      - ./.env
+    restart: on-failure
+    ports:
+      - "5555:5555"
+    command: bash -c "celery flower"
+    depends_on:
+      todo_redis:
+        condition: service_healthy
+      todo_celery:
+        condition: service_started
+
+volumes:
+  bot_service_static_data:
+  todo_service_static_data:
+  todo_db_data:
+  todo_celery_data:
+  todo_celery_beat_data:
+  todo_service_redis_data:
