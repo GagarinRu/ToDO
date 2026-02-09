@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# My
+requirements.txt
+.pre-commit-config.yaml
+.vscode/settings.json
